@@ -23,9 +23,9 @@ st.caption("Norsk juridisk assistent  enkel konsensus og RAG.")
 # API-KEYS
 # (slik du ville ha dem)
 # ---------------------------------------------------------
-GOOGLE_API_KEY = "AIzaSyASfnIh0X6bamzri5QIIPaTbjgTxfEaTwg"
-OPENAI_API_KEY = "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"
-GROK_API_KEY   = "xai-1TLuoW6VOgsiiywEuQkoSjCJhOMhE3efwAIw4qaE8ehi3A2CH9lEBynThITpDbAemdUiAfGQfS9YtZWF"
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+GROK_API_KEY   = st.secrets["GROK_API_KEY"]
+
 
 # Modellnavn – kan endres hvis du vil bruke andre modeller
 GEMINI_TEXT_MODEL = "gemini-2.0-flash"     # f.eks. gemini-1.5-flash / gemini-1.5-pro / gemini-2.0-flash
@@ -292,5 +292,6 @@ if prompt:
 
     # Lagre AI-svaret i historikken
     st.session_state.messages.append({"role": "ai", "content": final})
+
 
 
