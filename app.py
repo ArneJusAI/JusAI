@@ -1,4 +1,4 @@
-# app.py – JusAI med Gemini + Grok (konsensus + RAG)
+# app.py – JusAI  (konsensus + RAG)
 import streamlit as st
 import requests
 import pickle
@@ -16,7 +16,7 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("⚖️ JusAI – ")
+st.title("⚖️ JusAI ")
 st.caption("Norsk juridisk assistent  enkel konsensus og RAG.")
 
 # ---------------------------------------------------------
@@ -181,7 +181,7 @@ def call_grok(prompt: str) -> str:
         return f"[Grok-exception] {str(e)[:200]}"
 
 # ---------------------------------------------------------
-# KONSENSUSLOGIKK (GEMINI + GROK)
+# KONSENSUSLOGIKK
 # ---------------------------------------------------------
 def konsensus_svar(query: str):
     """Kjører RAG, spør JUS AI og lager et felles svar."""
@@ -274,7 +274,7 @@ if prompt:
 
     # Svar fra JusAI
     with st.chat_message("assistant"):
-        with st.spinner("Gemini og Grok analyserer spørsmålet ditt..."):
+        with st.spinner("JusAI analyserer spørsmålet ditt..."):
             final, kilder, konsensus_tekst, alle_svar = konsensus_svar(prompt)
 
             st.markdown(final)
@@ -292,3 +292,4 @@ if prompt:
 
     # Lagre AI-svaret i historikken
     st.session_state.messages.append({"role": "ai", "content": final})
+
