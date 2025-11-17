@@ -4,29 +4,28 @@ import requests
 import pickle
 import numpy as np
 import time
+import os
 from typing import List, Tuple, Dict
 
 # ---------------------------------------------------------
 # STREAMLIT SETTINGS
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="JusAI – 2 AI-er (Gemini + Grok)",
+    page_title="JusAI – Jus For alle",
     page_icon="⚖️",
     layout="centered"
 )
 
-st.title("⚖️ JusAI – Gemini + Grok")
-st.caption("Norsk juridisk assistent som bruker Gemini og Grok med enkel konsensus og RAG.")
+st.title("⚖️ JusAI – ")
+st.caption("Norsk juridisk assistent  enkel konsensus og RAG.")
 
 # ---------------------------------------------------------
 # API-KEYS
-# (du har gitt disse, jeg legger dem rett inn slik du ba om)
+# (slik du ville ha dem)
 # ---------------------------------------------------------
 GOOGLE_API_KEY = "AIzaSyASfnIh0X6bamzri5QIIPaTbjgTxfEaTwg"
 OPENAI_API_KEY = "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"
 GROK_API_KEY   = "xai-Iciiez1w1Jr7NWDyVFGGeV16K7gxtwRvyrLf8TYzqaxCSL7DjaLiyAEqybLoN80NcHzBRzYAUO8fcA9q"
-
-# Vi bruker bare GOOGLE_API_KEY + GROK_API_KEY i denne fila (ChatGPT er fjernet i logikken)
 
 # Modellnavn – kan endres hvis du vil bruke andre modeller
 GEMINI_TEXT_MODEL = "gemini-2.0-flash"     # f.eks. gemini-1.5-flash / gemini-1.5-pro / gemini-2.0-flash
@@ -34,17 +33,32 @@ GEMINI_EMB_MODEL  = "text-embedding-004"   # embedding-modell
 GROK_MODEL        = "grok-2-latest"        # juster til det som står i xAI-dashboardet om nødvendig
 
 # ---------------------------------------------------------
-# LAST INN RAG-DATABASE (lovdata_index.pkl)
-# Forventet format: liste av (chunk_text, embedding_vector, metadata)
+# LAST INN RAG-DATABASE (lovdata_index.pkl) FRA GITHUB RELEASE
 # ---------------------------------------------------------
 @st.cache_resource
 def load_rag_index():
+    """
+    Laster lovdata_index.pkl.
+    Hvis den ikke finnes lokalt, lastes den ned fra GitHub Releases.
+    """
+    url = "https://github.com/ArneJusAI/JusAI/releases/download/v1.0/lovdata_index.pkl"
+    local_path = "lovdata_index.pkl"
+
     try:
-        with open("lovdata_index.pkl", "rb") as f:
+        if not os.path.exists(local_path):
+            st.info("Laster ned lovdata_index.pkl fra GitHub ...")
+            r = requests.get(url)
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(r.content)
+
+        with open(local_path, "rb") as f:
             data = pickle.load(f)
+
         return data
-    except FileNotFoundError:
-        st.warning("⚠️ fant ikke 'lovdata_index.pkl'. Kjører uten lokal lovdatabase (kun generell kunnskap).")
+
+    except Exception as e:
+        st.warning(f"⚠️ Klarte ikke å laste lovdata_index.pkl – bruker kun generell kunnskap. ({str(e)[:150]})")
         return []
 
 indexed_data = load_rag_index()
@@ -170,7 +184,7 @@ def call_grok(prompt: str) -> str:
 # KONSENSUSLOGIKK (GEMINI + GROK)
 # ---------------------------------------------------------
 def konsensus_svar(query: str):
-    """Kjører RAG, spør Gemini og Grok og lager et felles svar."""
+    """Kjører RAG, spør JUS AI og lager et felles svar."""
     context = hybrid_rag_context(query, indexed_data)
 
     hovedprompt = f"""
@@ -228,7 +242,7 @@ Oppgave:
     # Placeholder-kilder – kan senere hentes ekte fra metadata i RAG
     kilder = []
     if indexed_data:
-        kilder.append("Utdrag fra lovdata_index.pkl (lokal RAG)")
+        kilder.append("Utdrag fra lovdata_index.pkl (GitHub Release, lokal RAG)")
     kilder.append("Generell norsk juridisk teori og rettspraksis")
 
     return final, kilder, konsensus_tekst, svarer
