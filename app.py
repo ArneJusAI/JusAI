@@ -237,7 +237,7 @@ Oppgave:
 - Skriv på norsk, med konklusjon først.
 """
     final = call_gemini(meta_prompt)
-    konsensus_tekst = "Felles svar generert basert på både Gemini og Grok."
+    konsensus_tekst = "Felles svar generert."
 
     # Placeholder-kilder – kan senere hentes ekte fra metadata i RAG
     kilder = []
@@ -292,6 +292,7 @@ if prompt:
 
     # Lagre AI-svaret i historikken
     st.session_state.messages.append({"role": "ai", "content": final})
+
 
 
 
