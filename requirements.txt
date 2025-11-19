@@ -1,5 +1,4 @@
 streamlit
-google-genai
+requests
 numpy
-beautifulsoup4
-tqdm
+sentence-transformers
