@@ -39,7 +39,7 @@ def load_rag_index():
     Hvis den ikke finnes lokalt, lastes den ned fra GitHub Releases.
     """
     # NB: endre v2.0 her hvis releasen din har en annen tag
-    url = "url = "https://github.com/ArneJusAI/JusAI/releases/download/V2.0/lovdata_index.pkl"
+    url = "https://github.com/ArneJusAI/JusAI/releases/download/V2.0/lovdata_index.pkl"
 "
     local_path = "lovdata_index.pkl"
 
@@ -290,4 +290,5 @@ if prompt:
 
     # Lagre AI-svaret i historikken
     st.session_state.messages.append({"role": "ai", "content": final})
+
 
