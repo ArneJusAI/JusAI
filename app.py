@@ -1,4 +1,4 @@
-# app.py – JusAI  (konsensus + RAG)
+# app.py – JusAI  (konsensus + RAG med lokal embedding)
 import streamlit as st
 import requests
 import pickle
@@ -6,6 +6,7 @@ import numpy as np
 import time
 import os
 from typing import List, Tuple, Dict
+from sentence_transformers import SentenceTransformer
 
 # ---------------------------------------------------------
 # STREAMLIT SETTINGS
@@ -16,20 +17,17 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("⚖️ JusAI ")
-st.caption("Norsk juridisk assistent  enkel konsensus og RAG.")
+st.title("⚖️ JusAI")
+st.caption("Norsk juridisk assistent med konsensus og RAG (Lovdata-indeks).")
 
 # ---------------------------------------------------------
-# API-KEYS
-# (slik du ville ha dem)
+# API-KEYS FRA SECRETS
 # ---------------------------------------------------------
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 GROK_API_KEY   = st.secrets["GROK_API_KEY"]
 
-
 # Modellnavn – kan endres hvis du vil bruke andre modeller
 GEMINI_TEXT_MODEL = "gemini-2.0-flash"     # f.eks. gemini-1.5-flash / gemini-1.5-pro / gemini-2.0-flash
-GEMINI_EMB_MODEL  = "text-embedding-004"   # embedding-modell
 GROK_MODEL        = "grok-2-latest"        # juster til det som står i xAI-dashboardet om nødvendig
 
 # ---------------------------------------------------------
@@ -41,7 +39,8 @@ def load_rag_index():
     Laster lovdata_index.pkl.
     Hvis den ikke finnes lokalt, lastes den ned fra GitHub Releases.
     """
-    url = "https://github.com/ArneJusAI/JusAI/releases/download/v1.0/lovdata_index.pkl"
+    # Endre taggen v2.0 hvis du brukte et annet navn på releasen
+    url = "https://github.com/ArneJusAI/JusAI/releases/download/v2.0/lovdata_index.pkl"
     local_path = "lovdata_index.pkl"
 
     try:
@@ -64,6 +63,19 @@ def load_rag_index():
 indexed_data = load_rag_index()
 
 # ---------------------------------------------------------
+# LOKAL EMBEDDING-MODELL (samme som brukt til å bygge indeksen)
+# ---------------------------------------------------------
+@st.cache_resource
+def get_embed_model():
+    # Må være samme modell som i build_lovdata_index.py
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+def embed_query(query: str) -> np.ndarray:
+    model = get_embed_model()
+    vec = model.encode(query)
+    return np.array(vec, dtype=float)
+
+# ---------------------------------------------------------
 # RAG HJELPEFUNKSJONER
 # ---------------------------------------------------------
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -72,59 +84,45 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
         return 0.0
     return float(np.dot(vec1, vec2) / denom)
 
-def retrieve_top_k(query_embedding: np.ndarray, data, k: int = 3):
-    """Returnerer de k mest relevante tekstbitene fra lovdata_index."""
+def retrieve_top_k(query_embedding: np.ndarray, data, k: int = 10, query_text: str = ""):
+    """
+    Returnerer de k mest relevante tekstbitene fra lovdata_index.
+    Liten ekstra boost hvis query-teksten finnes direkte i chunken.
+    """
     if not data:
         return []
 
     similarities = []
+    q_lower = query_text.lower() if query_text else ""
+
     for chunk_text, chunk_emb, metadata in data:
         chunk_emb = np.array(chunk_emb, dtype=float)
         score = cosine_similarity(query_embedding, chunk_emb)
+
+        # Boost eksakte teksttreff (f.eks. ved lovtittel eller paragrafnavn)
+        if q_lower and q_lower in chunk_text.lower():
+            score += 0.5
+
         similarities.append((chunk_text, score, metadata))
 
     similarities.sort(key=lambda x: x[1], reverse=True)
     return similarities[:k]
 
-def embed_query_gemini(query: str) -> np.ndarray:
-    """Bruker Gemini til å lage en embedding av spørsmålet."""
-    try:
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/"
-            f"models/{GEMINI_EMB_MODEL}:embedContent?key={GOOGLE_API_KEY}"
-        )
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "model": GEMINI_EMB_MODEL,
-            "content": {
-                "parts": [{"text": query}]
-            }
-        }
-
-        r = requests.post(url, headers=headers, json=payload, timeout=30)
-
-        if r.status_code == 200:
-            data = r.json()
-            # Struktur: {"embedding": {"values": [...]}}
-            values = data["embedding"]["values"]
-            return np.array(values, dtype=float)
-
-        else:
-            st.warning(f"Embedding-feil ({r.status_code}): {r.text[:200]}")
-            # Fallback – tilfeldig vektor (så appen ikke krasjer)
-            return np.random.rand(768)
-
-    except Exception as e:
-        st.warning(f"Embedding-exception: {str(e)[:200]}")
-        return np.random.rand(768)
-
 def hybrid_rag_context(query: str, data) -> str:
     """Bygger en kontekststreng fra RAG + en prompt om generell kunnskap."""
     if data:
-        query_emb = embed_query_gemini(query)
-        top_chunks = retrieve_top_k(query_emb, data, k=3)
+        query_emb = embed_query(query)
+        top_chunks = retrieve_top_k(query_emb, data, k=10, query_text=query)
         context_parts = [chunk for chunk, _, _ in top_chunks]
         context = "\n\n".join(context_parts)
+
+        # Debug-visning: hva RAG faktisk fant
+        with st.expander("🔍 RAG-treff (debug)", expanded=False):
+            for i, (chunk, score, meta) in enumerate(top_chunks):
+                st.write(f"Treff {i+1} – score {score:.3f}")
+                st.write(meta)
+                st.write(chunk[:400] + "…")
+                st.write("---")
     else:
         context = ""
 
@@ -184,7 +182,7 @@ def call_grok(prompt: str) -> str:
 # KONSENSUSLOGIKK
 # ---------------------------------------------------------
 def konsensus_svar(query: str):
-    """Kjører RAG, spør JUS AI og lager et felles svar."""
+    """Kjører RAG, spør Gemini og Grok og lager et felles svar."""
     context = hybrid_rag_context(query, indexed_data)
 
     hovedprompt = f"""
@@ -237,9 +235,9 @@ Oppgave:
 - Skriv på norsk, med konklusjon først.
 """
     final = call_gemini(meta_prompt)
-    konsensus_tekst = "Felles svar generert."
+    konsensus_tekst = "Felles svar generert basert på Gemini og Grok."
 
-    # Placeholder-kilder – kan senere hentes ekte fra metadata i RAG
+    # Kilder – kan senere hentes ekte fra metadata i RAG
     kilder = []
     if indexed_data:
         kilder.append("Utdrag fra lovdata_index.pkl (GitHub Release, lokal RAG)")
@@ -292,7 +290,3 @@ if prompt:
 
     # Lagre AI-svaret i historikken
     st.session_state.messages.append({"role": "ai", "content": final})
-
-
-
-
