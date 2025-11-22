@@ -1,4 +1,9 @@
-streamlit
-requests
-numpy
-sentence-transformers
+streamlit>=1.28.0
+requests>=2.31.0
+numpy>=1.24.0
+sentence-transformers>=2.2.0
+anthropic>=0.18.0
+
+# Dokumenthåndtering
+PyPDF2>=3.0.0
+python-docx>=0.8.11
