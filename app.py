@@ -28,7 +28,7 @@ st.set_page_config(
     layout="wide"  # Endret til wide for bedre plass
 )
 
-# Custom CSS for bedre utseende
+# Custom CSS for bedre utseende og auto-scroll
 st.markdown("""
 <style>
     .uploaded-file {
@@ -39,6 +39,19 @@ st.markdown("""
     }
     .file-list {
         max-height: 200px;
+        overflow-y: auto;
+    }
+    /* Sørg for at chat input er synlig nederst */
+    .stChatInput {
+        position: sticky;
+        bottom: 0;
+        background-color: white;
+        z-index: 999;
+        padding: 10px 0;
+    }
+    /* Begrens høyde på chat-historikk */
+    .chat-container {
+        max-height: calc(100vh - 300px);
         overflow-y: auto;
     }
 </style>
@@ -300,12 +313,16 @@ col_chat, col_docs = st.columns([2, 1])
 # VENSTRE: CHAT
 # ---------------------------------------------------------
 with col_chat:
-    # Vis tidligere meldinger
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    # Container for meldinger med fast høyde
+    chat_container = st.container()
     
-    # Chat input
+    with chat_container:
+        # Vis tidligere meldinger
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+    
+    # Chat input ALLTID nederst (utenfor containeren)
     user_input = st.chat_input("Skriv ditt juridiske spørsmål her...")
     
     if user_input:
@@ -323,6 +340,9 @@ with col_chat:
                 st.markdown(answer)
         
         st.session_state.messages.append({"role": "assistant", "content": answer})
+        
+        # Scroll til bunnen etter nytt svar
+        st.rerun()
 
 # ---------------------------------------------------------
 # HØYRE: DOKUMENTHÅNDTERING
