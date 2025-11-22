@@ -1,4 +1,4 @@
-# app.py – JusAI (FORENKLET med Claude + DOKUMENTANALYSE)
+# app.py – JusAI (med MULTIPPEL DOKUMENTOPPLASTING i chat)
 import streamlit as st
 import requests
 import pickle
@@ -25,8 +25,24 @@ except:
 st.set_page_config(
     page_title="JusAI – Jus For alle",
     page_icon="⚖️",
-    layout="centered"
+    layout="wide"  # Endret til wide for bedre plass
 )
+
+# Custom CSS for bedre utseende
+st.markdown("""
+<style>
+    .uploaded-file {
+        background-color: #f0f2f6;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+    }
+    .file-list {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("⚖️ JusAI")
 st.caption("Norsk juridisk assistent med Claude AI og Lovdata-indeks.")
@@ -35,8 +51,6 @@ st.caption("Norsk juridisk assistent med Claude AI og Lovdata-indeks.")
 # API-NØKKEL FRA SECRETS
 # ---------------------------------------------------------
 CLAUDE_API_KEY = st.secrets["CLAUDE_API_KEY"]
-
-# Claude-modell (dette er den beste for jus)
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # ---------------------------------------------------------
@@ -67,24 +81,22 @@ def load_rag_index():
 indexed_data = load_rag_index()
 
 # ---------------------------------------------------------
-# EMBEDDING-MODELL (for å søke i lovdata)
+# EMBEDDING-MODELL
 # ---------------------------------------------------------
 @st.cache_resource
 def get_embed_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
 def embed_query(query: str) -> np.ndarray:
-    """Lager en vektor av spørsmålet for søk"""
     model = get_embed_model()
     vec = model.encode(query)
     return np.array(vec, dtype=float)
 
 # ---------------------------------------------------------
-# DOKUMENTHÅNDTERING (PDF, DOCX, TXT)
+# DOKUMENTHÅNDTERING
 # ---------------------------------------------------------
 def extract_text_from_file(uploaded_file):
     """Henter ut tekst fra opplastede filer"""
-    
     file_type = uploaded_file.type
     file_name = uploaded_file.name.lower()
     
@@ -92,7 +104,7 @@ def extract_text_from_file(uploaded_file):
         # PDF
         if "pdf" in file_type or file_name.endswith('.pdf'):
             if not PDF_AVAILABLE:
-                return "⚠️ PDF-støtte er ikke installert. Last opp som TXT i stedet."
+                return "⚠️ PDF-støtte er ikke installert."
             
             pdf_reader = PyPDF2.PdfReader(uploaded_file)
             text = ""
@@ -100,10 +112,10 @@ def extract_text_from_file(uploaded_file):
                 text += page.extract_text() + "\n"
             return text.strip()
         
-        # DOCX (Word)
+        # DOCX
         elif "word" in file_type or file_name.endswith('.docx'):
             if not DOCX_AVAILABLE:
-                return "⚠️ Word-støtte er ikke installert. Last opp som TXT i stedet."
+                return "⚠️ Word-støtte er ikke installert."
             
             doc = Document(uploaded_file)
             text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
@@ -115,20 +127,18 @@ def extract_text_from_file(uploaded_file):
             return text.strip()
     
     except Exception as e:
-        return f"⚠️ Kunne ikke lese filen: {str(e)[:200]}"
+        return f"⚠️ Kunne ikke lese {uploaded_file.name}: {str(e)[:100]}"
 
 # ---------------------------------------------------------
-# SØKEFUNKSJONER (RAG)
+# RAG-FUNKSJONER
 # ---------------------------------------------------------
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
-    """Beregner hvor like to vektorer er (0-1)"""
     denom = (np.linalg.norm(vec1) * np.linalg.norm(vec2))
     if denom == 0:
         return 0.0
     return float(np.dot(vec1, vec2) / denom)
 
 def search_lovdata(query: str, data, k: int = 8) -> list:
-    """Søker etter de mest relevante lovtekstene"""
     if not data:
         return []
 
@@ -140,31 +150,27 @@ def search_lovdata(query: str, data, k: int = 8) -> list:
         chunk_emb = np.array(chunk_emb, dtype=float)
         score = cosine_similarity(query_vector, chunk_emb)
         
-        # Gi ekstra poeng hvis søkeordet finnes i teksten
         if q_lower in chunk_text.lower():
             score += 0.3
         
         results.append((chunk_text, score, metadata))
     
-    # Sorter etter beste treff
     results.sort(key=lambda x: x[1], reverse=True)
     return results[:k]
 
 def build_context(query: str, data) -> str:
-    """Bygger kontekst fra lovdata til Claude"""
     if not data:
-        return "Ingen lovdata tilgjengelig - bruk generell juridisk kunnskap."
+        return "Ingen lovdata tilgjengelig."
     
     top_results = search_lovdata(query, data, k=8)
-    
     context_parts = []
+    
     for i, (chunk, score, meta) in enumerate(top_results):
         context_parts.append(f"--- Kilde {i+1} (relevans: {score:.2f}) ---\n{chunk}")
     
     context = "\n\n".join(context_parts)
     
-    # Vis hva som ble funnet (for transparens)
-    with st.expander("🔍 Lovdata-kilder brukt (klikk for detaljer)"):
+    with st.expander("🔍 Lovdata-kilder brukt"):
         for i, (chunk, score, meta) in enumerate(top_results):
             st.write(f"**Treff {i+1}** – Relevans: {score:.2f}")
             st.caption(f"{meta}")
@@ -174,10 +180,9 @@ def build_context(query: str, data) -> str:
     return context
 
 # ---------------------------------------------------------
-# CLAUDE API-KALL
+# CLAUDE API
 # ---------------------------------------------------------
 def call_claude(prompt: str) -> str:
-    """Sender spørsmål til Claude og får svar"""
     try:
         url = "https://api.anthropic.com/v1/messages"
         headers = {
@@ -188,10 +193,8 @@ def call_claude(prompt: str) -> str:
         
         payload = {
             "model": CLAUDE_MODEL,
-            "max_tokens": 2000,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+            "max_tokens": 2500,
+            "messages": [{"role": "user", "content": prompt}]
         }
         
         response = requests.post(url, headers=headers, json=payload, timeout=60)
@@ -206,73 +209,26 @@ def call_claude(prompt: str) -> str:
         return f"⚠️ Kunne ikke kontakte Claude: {str(e)[:200]}"
 
 # ---------------------------------------------------------
-# DOKUMENTANALYSE
+# HOVEDFUNKSJON
 # ---------------------------------------------------------
-def analyze_document(document_text: str, doc_name: str = "dokumentet") -> str:
-    """Analyserer et juridisk dokument"""
+def get_legal_answer(query: str, documents: list = None):
+    """Henter lovdata og spør Claude"""
     
-    # Begrens teksten (for å ikke overskride token-limit)
-    if len(document_text) > 8000:
-        document_text = document_text[:8000] + "\n\n[... resten av dokumentet er kuttet for lengde ...]"
-    
-    analysis_prompt = f"""Du er JusAI – en norsk juridisk AI-assistent som analyserer dokumenter.
-
-Analyser følgende dokument nøye og gi en strukturert vurdering:
-
----
-DOKUMENT ({doc_name}):
-
-{document_text}
----
-
-Gi en analyse strukturert slik:
-
-## 📄 Type dokument
-[Hva er dette? Kontrakt, avtale, varsel, krav, leiekontrakt, etc.]
-
-## ⚠️ Identifiserte risikoer
-[Finn problematiske klausuler, formuleringer eller mangler. Vær konkret.]
-
-## ✅ Positive elementer
-[Hva er juridisk OK eller godt i dokumentet?]
-
-## 📝 Anbefalte endringer
-[Konkrete forslag til forbedringer, med begrunnelse]
-
-## ⚖️ Samlet vurdering
-[På en skala 1-10, hvor 10 er perfekt juridisk dokument. Gi også en overordnet anbefaling.]
-
-Vær pedagogisk, presis, og referer til relevante norske lover der det passer."""
-
-    return call_claude(analysis_prompt)
-
-# ---------------------------------------------------------
-# HOVEDFUNKSJON: SØK I LOVDATA + SPØR CLAUDE
-# ---------------------------------------------------------
-def get_legal_answer(query: str, document_context: str = None):
-    """Henter lovdata og spør Claude om svaret"""
-    
-    # 1. Finn relevante lovtekster
     context = build_context(query, indexed_data)
     
-    # 2. Legg til dokumentkontekst hvis det finnes
+    # Bygg dokumentseksjon hvis det finnes opplastede filer
     doc_section = ""
-    if document_context:
-        doc_section = f"""
-
----
-BRUKERENS OPPLASTEDE DOKUMENT:
-
-{document_context[:3000]}
----
-
-Når du svarer, ta hensyn til dette dokumentet der det er relevant.
-"""
+    if documents and len(documents) > 0:
+        doc_section = "\n\n---\nBRUKERENS OPPLASTEDE DOKUMENTER:\n\n"
+        for i, (name, content) in enumerate(documents):
+            # Begrens lengde per dokument
+            content_preview = content[:2500] if len(content) > 2500 else content
+            doc_section += f"DOKUMENT {i+1}: {name}\n{content_preview}\n\n"
+        doc_section += "---\n"
     
-    # 3. Lag en god prompt til Claude
     system_prompt = f"""Du er JusAI – en norsk juridisk AI-assistent.
 
-VIKTIG: Du skal svare på NORSK, bruk "du" til brukeren, vær presis og pedagogisk.
+VIKTIG: Svar på NORSK, bruk "du" til brukeren, vær presis og pedagogisk.
 
 Strukturer ALLTID svaret ditt slik:
 
@@ -293,7 +249,7 @@ Strukturer ALLTID svaret ditt slik:
 
 ---
 
-Her er relevant lovdata jeg har funnet:
+Her er relevant lovdata:
 
 {context}
 
@@ -306,13 +262,11 @@ Brukerens spørsmål:
 
 Gi et presist, forståelig svar basert på norsk rett."""
     
-    # 4. Spør Claude
     answer = call_claude(system_prompt)
-    
     return answer
 
 # ---------------------------------------------------------
-# CHAT-GRENSESNITT
+# SESSION STATE INITIALISERING
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -327,118 +281,191 @@ Jeg kan hjelpe deg med spørsmål om:
 - 📝 Kontrakter
 - ⚖️ Forliksråd
 
-Du kan også **laste opp dokumenter** (PDF, Word, TXT) i sidebaren for analyse!
+💡 **Tips:** Du kan dra og slippe dokumenter (PDF, Word, TXT) direkte i chat-boksen nedenfor, eller bruke opplastningsknappen. Last opp ALLE dokumenter som er relevante for saken din!
 
 Still gjerne spørsmålet ditt!"""
         }
     ]
 
-# For å lagre opplastet dokument
-if "uploaded_document" not in st.session_state:
-    st.session_state.uploaded_document = None
-    st.session_state.document_name = None
-
-# Vis tidligere meldinger
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Input fra bruker
-user_input = st.chat_input("Skriv ditt juridiske spørsmål her...")
-
-if user_input:
-    # Legg til brukerens melding
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    
-    # Få svar fra JusAI (Claude + RAG + dokument hvis relevant)
-    with st.chat_message("assistant"):
-        with st.spinner("⚖️ JusAI tenker..."):
-            answer = get_legal_answer(
-                user_input, 
-                document_context=st.session_state.uploaded_document
-            )
-            st.markdown(answer)
-    
-    # Lagre svaret
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+# Lagre opplastede dokumenter
+if "uploaded_documents" not in st.session_state:
+    st.session_state.uploaded_documents = []
 
 # ---------------------------------------------------------
-# SIDEBAR MED DOKUMENTOPPLASTING
+# LAYOUT: To kolonner
 # ---------------------------------------------------------
-with st.sidebar:
-    st.header("📄 Last opp dokument")
+col_chat, col_docs = st.columns([2, 1])
+
+# ---------------------------------------------------------
+# VENSTRE: CHAT
+# ---------------------------------------------------------
+with col_chat:
+    # Vis tidligere meldinger
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
     
-    uploaded_file = st.file_uploader(
-        "Last opp PDF, Word eller TXT",
+    # Chat input
+    user_input = st.chat_input("Skriv ditt juridiske spørsmål her...")
+    
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("⚖️ JusAI analyserer..."):
+                answer = get_legal_answer(
+                    user_input, 
+                    documents=st.session_state.uploaded_documents
+                )
+                st.markdown(answer)
+        
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+
+# ---------------------------------------------------------
+# HØYRE: DOKUMENTHÅNDTERING
+# ---------------------------------------------------------
+with col_docs:
+    st.subheader("📁 Dokumenter i saken")
+    
+    # Opplastningsområde
+    uploaded_files = st.file_uploader(
+        "Dra og slipp filer her, eller klikk for å velge",
         type=["pdf", "docx", "doc", "txt"],
-        help="Dokumentet vil bli analysert og brukt som kontekst i samtalen"
+        accept_multiple_files=True,
+        help="Du kan laste opp flere dokumenter samtidig. Alle vil bli brukt som kontekst."
     )
     
-    if uploaded_file is not None:
-        if st.button("🔍 Analyser dokument", type="primary"):
-            with st.spinner("Leser dokumentet..."):
-                # Hent ut tekst
-                doc_text = extract_text_from_file(uploaded_file)
-                
-                if doc_text.startswith("⚠️"):
-                    st.error(doc_text)
-                else:
-                    # Lagre i session state
-                    st.session_state.uploaded_document = doc_text
-                    st.session_state.document_name = uploaded_file.name
+    if uploaded_files:
+        new_docs_added = False
+        
+        for uploaded_file in uploaded_files:
+            # Sjekk om filen allerede er lastet opp
+            existing_names = [name for name, _ in st.session_state.uploaded_documents]
+            
+            if uploaded_file.name not in existing_names:
+                with st.spinner(f"Leser {uploaded_file.name}..."):
+                    text = extract_text_from_file(uploaded_file)
                     
-                    st.success(f"✅ {uploaded_file.name} er lastet inn!")
-                    
-                    # Vis preview
-                    with st.expander("👀 Se innhold (første 500 tegn)"):
-                        st.text(doc_text[:500] + "...")
-                    
-                    # Kjør automatisk analyse
-                    with st.spinner("Analyserer juridisk innhold..."):
-                        analysis = analyze_document(doc_text, uploaded_file.name)
-                        
-                        # Vis analyse
-                        st.markdown("### 📊 Analyse")
-                        st.markdown(analysis)
-                        
-                        # Legg analyse i chat
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": f"**Jeg har analysert {uploaded_file.name}:**\n\n{analysis}"
-                        })
-    
-    # Vis hvilket dokument som er aktivt
-    if st.session_state.uploaded_document:
-        st.info(f"📎 Aktivt dokument: **{st.session_state.document_name}**")
-        if st.button("🗑️ Fjern dokument"):
-            st.session_state.uploaded_document = None
-            st.session_state.document_name = None
+                    if not text.startswith("⚠️"):
+                        st.session_state.uploaded_documents.append(
+                            (uploaded_file.name, text)
+                        )
+                        new_docs_added = True
+                    else:
+                        st.error(text)
+        
+        if new_docs_added:
+            st.success("✅ Dokumenter lastet inn!")
             st.rerun()
     
-    st.divider()
+    # Vis liste over opplastede dokumenter
+    if st.session_state.uploaded_documents:
+        st.markdown("### 📄 Aktive dokumenter:")
+        
+        for i, (name, content) in enumerate(st.session_state.uploaded_documents):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            
+            with col1:
+                st.markdown(f"**{i+1}.** {name}")
+            
+            with col2:
+                if st.button("👁️", key=f"view_{i}", help="Se innhold"):
+                    with st.expander(f"Innhold: {name}", expanded=True):
+                        st.text(content[:1000] + ("..." if len(content) > 1000 else ""))
+            
+            with col3:
+                if st.button("🗑️", key=f"delete_{i}", help="Fjern"):
+                    st.session_state.uploaded_documents.pop(i)
+                    st.rerun()
+        
+        # Mulighet til å analysere alle dokumenter
+        if st.button("🔍 Analyser alle dokumenter", type="primary", use_container_width=True):
+            with st.spinner("Analyserer dokumentene juridisk..."):
+                all_docs_text = "\n\n---\n\n".join([
+                    f"DOKUMENT: {name}\n\n{content[:3000]}" 
+                    for name, content in st.session_state.uploaded_documents
+                ])
+                
+                analysis_prompt = f"""Du er JusAI. Analyser disse dokumentene samlet som en juridisk sak:
+
+{all_docs_text}
+
+Gi en analyse strukturert slik:
+
+## 📊 Oversikt over saken
+[Hva handler dette om totalt sett?]
+
+## 📄 Oppsummering av dokumentene
+[Kort om hvert dokument og deres rolle]
+
+## ⚠️ Juridiske risikoer
+[Hva er problematisk?]
+
+## ✅ Sterke punkter
+[Hva støtter saken din?]
+
+## 🎯 Anbefaling
+[Hva bør gjøres nå?]"""
+                
+                analysis = call_claude(analysis_prompt)
+                
+                with st.chat_message("assistant"):
+                    st.markdown("**📊 Analyse av alle dokumenter:**\n\n" + analysis)
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"**📊 Analyse av alle dokumenter:**\n\n{analysis}"
+                })
+        
+        # Knapp for å fjerne alle
+        if st.button("🗑️ Fjern alle dokumenter", use_container_width=True):
+            st.session_state.uploaded_documents = []
+            st.rerun()
     
+    else:
+        st.info("👆 Ingen dokumenter lastet opp ennå.\n\nLast opp alle dokumenter som er relevante for saken din.")
+    
+    # Tips-boks
+    st.markdown("---")
+    st.markdown("""
+    ### 💡 Tips
+    
+    **Last opp:**
+    - Alle kontrakter
+    - Brev/e-poster
+    - Krav og varsler
+    - Kvitteringer
+    - Bilder (som PDF)
+    
+    **Så spør:**
+    - "Analyser saken min"
+    - "Hva er mine rettigheter?"
+    - "Hva bør jeg gjøre?"
+    """)
+
+# ---------------------------------------------------------
+# SIDEBAR: INFO
+# ---------------------------------------------------------
+with st.sidebar:
     st.header("Om JusAI")
     st.write("""
     JusAI bruker:
     - 🤖 **Claude AI** (Anthropic)
     - 📚 **Lovdata-indeks** (74 617 tekster)
     - 🔍 **RAG** (søker i lovverket)
-    - 📄 **Dokumentanalyse**
+    - 📄 **Multi-dokument analyse**
     
     Alle svar er basert på norsk lov og rettspraksis.
     """)
     
     st.divider()
     
-    st.info("""
-    💡 **Tips:**
-    - Vær konkret i spørsmålet
-    - Nevn beløp hvis relevant
-    - Fortell hva som har skjedd
-    - Last opp kontrakter for analyse
+    st.success("""
+    ☕ Liker du JusAI?
+    [Støtt prosjektet](https://buymeacoffee.com/jusai)
     """)
     
     st.divider()
@@ -448,9 +475,9 @@ with st.sidebar:
     JusAI gir juridisk veiledning, men erstatter ikke advokat ved komplekse saker.
     """)
     
-    st.divider()
-    
-    st.success("""
-    ☕ Liker du JusAI?
-    [Støtt prosjektet](https://buymeacoffee.com/jusai)
-    """)
+    # Statistikk
+    if st.session_state.uploaded_documents:
+        st.divider()
+        st.metric("📁 Dokumenter lastet", len(st.session_state.uploaded_documents))
+        total_chars = sum(len(content) for _, content in st.session_state.uploaded_documents)
+        st.metric("📝 Totalt tegn", f"{total_chars:,}")
